@@ -270,10 +270,12 @@ let totalBarsCount=0;
 let rawData=null;
 let audioCtx;
 
-// Konfigurasi Audio Sample
+// Penambahan manajemen node aktif untuk sustain per layer
+let activeNodes = {}; 
+
 let angklungBuffer = null;
 const SAMPLE_URL = 'suara angklung.mp3';
-const BASE_MIDI = 65; // Sample adalah nada F4 (MIDI 65)
+const BASE_MIDI = 65; 
 
 async function initAudio(){
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -295,43 +297,41 @@ async function initAudio(){
     }
 }
 
-function playTone(midiNote, durationMs){
-    // Pastikan audio context dan buffer tersedia
+function playTone(midiNote, lIdx){
     if(!audioCtx || !angklungBuffer) return;
+
+    // Fade out suara yang sedang aktif di layer tersebut sebelum memutar yang baru
+    if (activeNodes[lIdx]) {
+        activeNodes[lIdx].gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+        activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
+    }
 
     const source = audioCtx.createBufferSource();
     const gain = audioCtx.createGain();
 
     source.buffer = angklungBuffer;
-
-    // Rumus Pitch Shifting berdasarkan MIDI 65 (F4)
-    // ratio = 2^((target - base) / 12)
     const playbackRate = Math.pow(2, (midiNote - BASE_MIDI) / 12);
     source.playbackRate.value = playbackRate;
 
-    // Envelope Control
     gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (durationMs / 1000));
-
+    
     source.connect(gain);
     gain.connect(audioCtx.destination);
 
     source.start(audioCtx.currentTime);
-    source.stop(audioCtx.currentTime + (durationMs / 1000));
+    
+    // Simpan referensi node untuk layer ini
+    activeNodes[lIdx] = { source, gain };
 }
 
-function getNoteDuration(bIdx,lIdx,tIdx){
-let nextTick=currentTick+1;
-let duration=0;
-const msPerTick=(60000/globalTempo)/4;
-while(nextTick<totalBarsCount*16){
-const b=Math.floor(nextTick/16);
-const t=nextTick%16;
-if(rawData.sections[0].bars[b].grid[lIdx][t]!=="") break;
-duration++;
-nextTick++;
-}
-return (duration+1)*msPerTick;
+function stopAllSounds() {
+    Object.keys(activeNodes).forEach(lIdx => {
+        if(activeNodes[lIdx]) {
+            activeNodes[lIdx].gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+            activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
+        }
+    });
+    activeNodes = {};
 }
 
 document.getElementById('jsonInput').onchange=function(e){
@@ -344,7 +344,6 @@ globalTempo=tempoVal<1?120:tempoVal;
 document.getElementById('displayTempo').innerText=`BPM: ${globalTempo}`;
 render(rawData);
 document.getElementById('controls').style.display='flex';
-// Trigger loading sample saat file dipilih
 initAudio();
 }catch(err){alert("File JSON tidak terbaca!");}
 };
@@ -403,7 +402,7 @@ return `<div class="note" id="nt-${bIdx}-${lIdx}-${tIdx}" data-midi="${v}">${dot
 }
 
 async function togglePlay(){
-await initAudio(); // Gunakan await untuk memastikan sample siap
+await initAudio(); 
 if(audioCtx.state==='suspended') audioCtx.resume();
 if(isPlaying) pausePlayback();
 else startPlayback();
@@ -424,8 +423,8 @@ const columnBeats = document.querySelectorAll(`[id^="beat-${bIdx}-"][id$="-${bea
 if(columnBeats.length > 0){
 columnBeats.forEach(beat => beat.classList.add('active-beat'));
 if(beatIdx === 0) {
-const curBar = document.getElementById(`bar-${bIdx}`);
-curBar.scrollIntoView({behavior:'smooth',block:'center'});
+const curBar = document.getElementById(`bar-${gIdx}`);
+if(curBar) curBar.scrollIntoView({behavior:'smooth',block:'center'});
 document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCount}`;
 }
 }
@@ -434,14 +433,11 @@ document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCou
 const layerNodes=document.querySelectorAll(`[id^="nt-${bIdx}-"][id$="-${tIdx}"]`);
 layerNodes.forEach((n,lIdx)=>{
 if(n.dataset.midi){
-const duration=getNoteDuration(bIdx,lIdx,tIdx);
-playTone(parseInt(n.dataset.midi),duration);
+playTone(parseInt(n.dataset.midi), lIdx);
 n.classList.add('active');
-n.style.transitionDuration=(duration/1000)+'s';
 setTimeout(()=>{
 n.classList.remove('active');
-n.style.transitionDuration='0.1s';
-},duration);
+}, msPerTick);
 }
 });
 currentTick++;
@@ -452,14 +448,17 @@ if(currentTick>=totalBarsCount*16) stopPlayback();
 function pausePlayback(){
 isPlaying=false;
 clearInterval(playInterval);
+stopAllSounds();
 document.getElementById('btnPlay').innerText="RESUME";
 }
 
 function stopPlayback(){
-pausePlayback();
+isPlaying=false;
+clearInterval(playInterval);
 currentTick=0;
+stopAllSounds();
 document.getElementById('btnPlay').innerText="PLAY";
-document.querySelectorAll('.note.active').forEach(el=>{el.classList.remove('active');el.style.transitionDuration='0.1s';});
+document.querySelectorAll('.note.active').forEach(el=>{el.classList.remove('active');});
 document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
 window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -490,4 +489,3 @@ if(e.code==="Escape") stopPlayback();
 </script>
 </body>
 </html>
-
