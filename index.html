@@ -270,12 +270,11 @@ let totalBarsCount=0;
 let rawData=null;
 let audioCtx;
 
-// Penambahan manajemen node aktif untuk sustain per layer
-let activeNodes = {}; 
-
+// Konfigurasi Audio Sample
 let angklungBuffer = null;
 const SAMPLE_URL = 'suara angklung.mp3';
-const BASE_MIDI = 65; 
+const BASE_MIDI = 65; // Sample adalah nada F4 (MIDI 65)
+const activeSources = {}; // Melacak node per layer
 
 async function initAudio(){
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -297,14 +296,15 @@ async function initAudio(){
     }
 }
 
-// Fungsi playTone yang dimodifikasi untuk sustain
-function playTone(midiNote, lIdx){
+function playTone(midiNote, durationMs, layerIdx){
     if(!audioCtx || !angklungBuffer) return;
 
-    // Fade out suara yang sedang aktif di layer tersebut agar tidak terputus kasar
-    if (activeNodes[lIdx]) {
-        activeNodes[lIdx].gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-        activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
+    // Fade out suara sebelumnya di layer yang sama jika ada
+    if(activeSources[layerIdx]) {
+        const prevGain = activeSources[layerIdx].gain;
+        const prevSource = activeSources[layerIdx].source;
+        prevGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
+        prevSource.stop(audioCtx.currentTime + 0.06);
     }
 
     const source = audioCtx.createBufferSource();
@@ -321,19 +321,29 @@ function playTone(midiNote, lIdx){
 
     source.start(audioCtx.currentTime);
     
-    // Simpan referensi node agar bisa di-fade out saat ada nada baru di layer ini
-    activeNodes[lIdx] = { source, gain };
+    // Simpan referensi
+    activeSources[layerIdx] = { source, gain };
+
+    // Lepas referensi setelah selesai
+    source.onended = () => {
+        if(activeSources[layerIdx] && activeSources[layerIdx].source === source) {
+            delete activeSources[layerIdx];
+        }
+    };
 }
 
-// Fungsi berhenti paksa untuk semua suara
-function stopAllSounds() {
-    Object.keys(activeNodes).forEach(lIdx => {
-        if(activeNodes[lIdx]) {
-            activeNodes[lIdx].gain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
-            activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
-        }
-    });
-    activeNodes = {};
+function getNoteDuration(bIdx,lIdx,tIdx){
+let nextTick=currentTick+1;
+let duration=0;
+const msPerTick=(60000/globalTempo)/4;
+while(nextTick<totalBarsCount*16){
+const b=Math.floor(nextTick/16);
+const t=nextTick%16;
+if(rawData.sections[0].bars[b].grid[lIdx][t]!=="") break;
+duration++;
+nextTick++;
+}
+return (duration+1)*msPerTick;
 }
 
 document.getElementById('jsonInput').onchange=function(e){
@@ -404,7 +414,7 @@ return `<div class="note" id="nt-${bIdx}-${lIdx}-${tIdx}" data-midi="${v}">${dot
 }
 
 async function togglePlay(){
-await initAudio(); 
+await initAudio();
 if(audioCtx.state==='suspended') audioCtx.resume();
 if(isPlaying) pausePlayback();
 else startPlayback();
@@ -426,7 +436,7 @@ if(columnBeats.length > 0){
 columnBeats.forEach(beat => beat.classList.add('active-beat'));
 if(beatIdx === 0) {
 const curBar = document.getElementById(`bar-${bIdx}`);
-if(curBar) curBar.scrollIntoView({behavior:'smooth',block:'center'});
+curBar.scrollIntoView({behavior:'smooth',block:'center'});
 document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCount}`;
 }
 }
@@ -435,11 +445,14 @@ document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCou
 const layerNodes=document.querySelectorAll(`[id^="nt-${bIdx}-"][id$="-${tIdx}"]`);
 layerNodes.forEach((n,lIdx)=>{
 if(n.dataset.midi){
-playTone(parseInt(n.dataset.midi), lIdx);
+const duration=getNoteDuration(bIdx,lIdx,tIdx);
+playTone(parseInt(n.dataset.midi),duration, lIdx);
 n.classList.add('active');
+n.style.transitionDuration=(duration/1000)+'s';
 setTimeout(()=>{
 n.classList.remove('active');
-}, msPerTick);
+n.style.transitionDuration='0.1s';
+},duration);
 }
 });
 currentTick++;
@@ -450,19 +463,24 @@ if(currentTick>=totalBarsCount*16) stopPlayback();
 function pausePlayback(){
 isPlaying=false;
 clearInterval(playInterval);
-stopAllSounds();
 document.getElementById('btnPlay').innerText="RESUME";
 }
 
 function stopPlayback(){
-isPlaying=false;
-clearInterval(playInterval);
+pausePlayback();
 currentTick=0;
-stopAllSounds();
 document.getElementById('btnPlay').innerText="PLAY";
-document.querySelectorAll('.note.active').forEach(el=>{el.classList.remove('active');});
+document.querySelectorAll('.note.active').forEach(el=>{el.classList.remove('active');el.style.transitionDuration='0.1s';});
 document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
 window.scrollTo({top:0,behavior:'smooth'});
+
+// Fade out semua suara yang aktif saat stop
+Object.keys(activeSources).forEach(lIdx => {
+    const {source, gain} = activeSources[lIdx];
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+    source.stop(audioCtx.currentTime + 0.11);
+    delete activeSources[lIdx];
+});
 }
 
 function createNewPage(title,tempo,pageNum){
@@ -471,7 +489,7 @@ page.className="a4-page";
 page.innerHTML=`
 <div class="sheet-header">
 <h1 class="text-xl font-black uppercase text-blue-900">${title}</h1>
-<div class="flex gap-4 text-[11px] font-bold text-gray-400">
+<div class="flex gap-4 text-[111px] font-bold text-gray-400">
 <span>Do = C</span>
 <span>4/4</span>
 <span>T: ${tempo}</span>
