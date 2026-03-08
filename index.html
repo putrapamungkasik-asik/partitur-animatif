@@ -297,12 +297,13 @@ async function initAudio(){
     }
 }
 
+// Fungsi playTone yang dimodifikasi untuk sustain
 function playTone(midiNote, lIdx){
     if(!audioCtx || !angklungBuffer) return;
 
-    // Fade out suara yang sedang aktif di layer tersebut sebelum memutar yang baru
+    // Fade out suara yang sedang aktif di layer tersebut agar tidak terputus kasar
     if (activeNodes[lIdx]) {
-        activeNodes[lIdx].gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+        activeNodes[lIdx].gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
         activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
     }
 
@@ -320,14 +321,15 @@ function playTone(midiNote, lIdx){
 
     source.start(audioCtx.currentTime);
     
-    // Simpan referensi node untuk layer ini
+    // Simpan referensi node agar bisa di-fade out saat ada nada baru di layer ini
     activeNodes[lIdx] = { source, gain };
 }
 
+// Fungsi berhenti paksa untuk semua suara
 function stopAllSounds() {
     Object.keys(activeNodes).forEach(lIdx => {
         if(activeNodes[lIdx]) {
-            activeNodes[lIdx].gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+            activeNodes[lIdx].gain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
             activeNodes[lIdx].source.stop(audioCtx.currentTime + 0.1);
         }
     });
@@ -423,7 +425,7 @@ const columnBeats = document.querySelectorAll(`[id^="beat-${bIdx}-"][id$="-${bea
 if(columnBeats.length > 0){
 columnBeats.forEach(beat => beat.classList.add('active-beat'));
 if(beatIdx === 0) {
-const curBar = document.getElementById(`bar-${gIdx}`);
+const curBar = document.getElementById(`bar-${bIdx}`);
 if(curBar) curBar.scrollIntoView({behavior:'smooth',block:'center'});
 document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCount}`;
 }
