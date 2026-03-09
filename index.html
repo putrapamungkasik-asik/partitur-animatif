@@ -49,8 +49,7 @@ body{background:#f8fafc;font-family:'Poppins',sans-serif;margin:0;padding:20px;p
                 <input type="file" id="jsonInput" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
             </div>
             <div>
-                <label class="block text-[10px] font-bold text-gray-400 text-left mb-1 uppercase tracking-wider">2. Load Angklung Sound (MP3/WAV)</label>
-                <input type="file" id="audioInput" accept="audio/*" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 cursor-pointer">
+                <p id="audioStatus" class="text-[10px] text-gray-400 text-left mt-2">Status Audio: Inisialisasi...</p>
             </div>
         </div>
     </div>
@@ -69,30 +68,20 @@ body{background:#f8fafc;font-family:'Poppins',sans-serif;margin:0;padding:20px;p
 
 <script>
 /** * KONVERSI DINAMIS MIDI KE ANGKLUNG (NADA NOMOR)
- * Basis: MIDI 60 = 1 (Do)
  */
 function getAngklungNoteInfo(midi) {
     const noteLabels = ["1", "1/", "2", "2/", "3", "4", "4/", "5", "5/", "6", "6/", "7"];
     const val = parseInt(midi);
     const relative = val - 60;
-    
-    // Hitung index nada (0-11) dan oktaf relatif terhadap oktaf 4 (middle C)
     const octave = Math.floor(relative / 12);
     const noteIdx = ((relative % 12) + 12) % 12;
-    
-    return {
-        label: noteLabels[noteIdx],
-        octave: octave
-    };
+    return { label: noteLabels[noteIdx], octave: octave };
 }
 
 let currentTick=0; let isPlaying=false; let playInterval; let globalTempo=120; let totalBarsCount=0; let rawData=null; let audioCtx; let angklungBuffer = null; const BASE_MIDI = 60; 
 let globalAllBars = []; 
-
 let activeVoices = {}; 
-let reverbNode; 
-let reverbGain; 
-let dryGain; 
+let reverbNode, reverbGain, dryGain; 
 
 function createSyntheticImpulseResponse(duration, decay) {
     const sampleRate = audioCtx.sampleRate;
@@ -109,7 +98,8 @@ function createSyntheticImpulseResponse(duration, decay) {
 
 function initAudio() {
     if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
         reverbNode = audioCtx.createConvolver();
         reverbNode.buffer = createSyntheticImpulseResponse(2.5, 3.0);
         reverbGain = audioCtx.createGain();
@@ -122,13 +112,35 @@ function initAudio() {
     }
 }
 
-document.getElementById('audioInput').onchange = async function(e) {
-    initAudio();
-    const file = e.target.files[0];
-    if (!file) return;
-    const arrayBuffer = await file.arrayBuffer();
-    try { angklungBuffer = await audioCtx.decodeAudioData(arrayBuffer); } catch (err) { alert("Format audio tidak didukung!"); }
-};
+/** * INTEGRASI AUTO-LOAD AUDIO
+ * Memuat file audio dari URL secara otomatis saat DOM siap.
+ */
+async function autoLoadAudio() {
+    const statusText = document.getElementById('audioStatus');
+    const audioUrl = "https://dl.dropboxusercontent.com/scl/fi/8719fczkaocgu4kse470e/47790002-angklung-f-4-120-279387.mp3?rlkey=7k9lujakltf78c48j719dn0wr&st=64qwhudg&dl=1";
+    
+    try {
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-blue-500 font-bold'>Sedang Mengunduh...</span>";
+        
+        // Inisialisasi konteks audio agar siap menerima buffer
+        initAudio();
+        
+        const response = await fetch(audioUrl);
+        if(!response.ok) throw new Error("Gagal mengunduh audio dari server.");
+        
+        const arrayBuffer = await response.arrayBuffer();
+        angklungBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-green-500 font-bold'>Angklung Ready!</span>";
+        console.log("Audio Angklung berhasil dimuat otomatis.");
+    } catch (err) { 
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-red-500 font-bold'>Gagal Muat Audio Otomatis.</span>";
+        console.error("Auto-load error:", err); 
+    }
+}
+
+// Jalankan auto-load saat halaman siap
+window.addEventListener('DOMContentLoaded', autoLoadAudio);
 
 function playTone(midiNote, layerIdx, visualNode) {
     if (!angklungBuffer) return;
@@ -205,160 +217,153 @@ function clearAllVoices() {
 }
 
 document.getElementById('jsonInput').onchange=function(e){
-const reader=new FileReader();
-reader.onload=(ev)=>{
-try{
-rawData=JSON.parse(ev.target.result);
-let tempoVal=parseFloat(rawData.tempo);
-globalTempo=tempoVal<1?120:tempoVal;
-document.getElementById('displayTempo').innerText=`BPM: ${globalTempo}`;
-render(rawData);
-document.getElementById('controls').style.display='flex';
-}catch(err){alert("File JSON tidak terbaca!");}
-};
-reader.readAsText(e.target.files[0]);
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+        try{
+            rawData=JSON.parse(ev.target.result);
+            let tempoVal=parseFloat(rawData.tempo);
+            globalTempo=tempoVal<1?120:tempoVal;
+            document.getElementById('displayTempo').innerText=`BPM: ${globalTempo}`;
+            render(rawData);
+            document.getElementById('controls').style.display='flex';
+        }catch(err){alert("File JSON tidak terbaca!");}
+    };
+    reader.readAsText(e.target.files[0]);
 };
 
 function render(data){
-const printArea=document.getElementById('print-area');
-printArea.innerHTML="";
-globalAllBars=[];
-data.sections.forEach(sec=>{sec.bars.forEach(bar=>globalAllBars.push(bar));});
-totalBarsCount=globalAllBars.length;
-const BARS_PER_PAGE=20;
-for(let i=0;i<globalAllBars.length;i+=BARS_PER_PAGE){
-const pageEl=createNewPage(data.songTitle||"STUDI ANGKLUNG",globalTempo,Math.floor(i/BARS_PER_PAGE)+1);
-const staff=pageEl.querySelector('.staff-container');
-const pageBars=globalAllBars.slice(i,i+BARS_PER_PAGE);
-pageBars.forEach((barData,barIdx)=>{
-const gIdx=i+barIdx;
-const barEl=document.createElement('div');
-barEl.className="bar-box";
-barEl.id=`bar-${gIdx}`;
-barEl.innerHTML=`<span class="bar-num">${gIdx+1}</span>`;
-barData.grid.forEach((layer,lIdx)=>{
-const row=document.createElement('div');
-row.className="layer-row";
-for(let b=0;b<16;b+=4){
-const ticks=layer.slice(b,b+4);
-const beat=document.createElement('div');
-beat.className="beat-unit";
-beat.id=`beat-${gIdx}-${lIdx}-${b/4}`;
-const active=ticks.filter(t=>t!=="").length;
-if(active>=2) beat.classList.add('has-beam');
-if(active===4) beat.classList.add('has-beam-2');
-beat.innerHTML=ticks.map((t,tIdx)=>createNote(t,gIdx,lIdx,b+tIdx)).join("");
-row.appendChild(beat);
-}
-barEl.appendChild(row);
-});
-staff.appendChild(barEl);
-});
-printArea.appendChild(pageEl);
-}
+    const printArea=document.getElementById('print-area');
+    printArea.innerHTML="";
+    globalAllBars=[];
+    data.sections.forEach(sec=>{sec.bars.forEach(bar=>globalAllBars.push(bar));});
+    totalBarsCount=globalAllBars.length;
+    const BARS_PER_PAGE=20;
+    for(let i=0;i<globalAllBars.length;i+=BARS_PER_PAGE){
+        const pageEl=createNewPage(data.songTitle||"STUDI ANGKLUNG",globalTempo,Math.floor(i/BARS_PER_PAGE)+1);
+        const staff=pageEl.querySelector('.staff-container');
+        const pageBars=globalAllBars.slice(i,i+BARS_PER_PAGE);
+        pageBars.forEach((barData,barIdx)=>{
+            const gIdx=i+barIdx;
+            const barEl=document.createElement('div');
+            barEl.className="bar-box";
+            barEl.id=`bar-${gIdx}`;
+            barEl.innerHTML=`<span class="bar-num">${gIdx+1}</span>`;
+            barData.grid.forEach((layer,lIdx)=>{
+                const row=document.createElement('div');
+                row.className="layer-row";
+                for(let b=0;b<16;b+=4){
+                    const ticks=layer.slice(b,b+4);
+                    const beat=document.createElement('div');
+                    beat.className="beat-unit";
+                    beat.id=`beat-${gIdx}-${lIdx}-${b/4}`;
+                    const active=ticks.filter(t=>t!=="").length;
+                    if(active>=2) beat.classList.add('has-beam');
+                    if(active===4) beat.classList.add('has-beam-2');
+                    beat.innerHTML=ticks.map((t,tIdx)=>createNote(t,gIdx,lIdx,b+tIdx)).join("");
+                    row.appendChild(beat);
+                }
+                barEl.appendChild(row);
+            });
+            staff.appendChild(barEl);
+        });
+        printArea.appendChild(pageEl);
+    }
 }
 
 function createNote(v,bIdx,lIdx,tIdx){
-if(!v||v==="") return `<div class="note empty"></div>`;
-
-const midi = parseInt(v);
-const info = getAngklungNoteInfo(midi);
-
-// Tentukan visualisasi berdasarkan info konversi dinamis
-const slash = info.label.includes("/") ? `<span class="slash">/</span>` : "";
-const clean = info.label.replace("/", "");
-let dots = "";
-
-// Logika titik oktaf dinamis
-if (info.octave === 1) dots = `<span class="dot dot-u">.</span>`;
-else if (info.octave === 2) dots = `<span class="dot dot-u2">..</span>`;
-else if (info.octave >= 3) dots = `<span class="dot dot-u2">...</span>`;
-else if (info.octave === -1) dots = `<span class="dot dot-d">.</span>`;
-else if (info.octave <= -2) dots = `<span class="dot dot-d2">..</span>`;
-
-return `<div class="note" id="nt-${bIdx}-${lIdx}-${tIdx}" data-midi="${v}">${dots}${slash}${clean}</div>`;
+    if(!v||v==="") return `<div class="note empty"></div>`;
+    const midi = parseInt(v);
+    const info = getAngklungNoteInfo(midi);
+    const slash = info.label.includes("/") ? `<span class="slash">/</span>` : "";
+    const clean = info.label.replace("/", "");
+    let dots = "";
+    if (info.octave === 1) dots = `<span class="dot dot-u">.</span>`;
+    else if (info.octave === 2) dots = `<span class="dot dot-u2">..</span>`;
+    else if (info.octave >= 3) dots = `<span class="dot dot-u2">...</span>`;
+    else if (info.octave === -1) dots = `<span class="dot dot-d">.</span>`;
+    else if (info.octave <= -2) dots = `<span class="dot dot-d2">..</span>`;
+    return `<div class="note" id="nt-${bIdx}-${lIdx}-${tIdx}" data-midi="${v}">${dots}${slash}${clean}</div>`;
 }
 
 function togglePlay(){
-initAudio();
-if(audioCtx.state==='suspended') audioCtx.resume();
-if(isPlaying) pausePlayback();
-else startPlayback();
+    initAudio();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    if(isPlaying) pausePlayback();
+    else startPlayback();
 }
 
 function startPlayback(){
-isPlaying=true;
-document.getElementById('btnPlay').innerText="PAUSE";
-const msPerTick=(60000/globalTempo)/4;
+    isPlaying=true;
+    document.getElementById('btnPlay').innerText="PAUSE";
+    const msPerTick=(60000/globalTempo)/4;
+    playInterval=setInterval(()=>{
+        const bIdx=Math.floor(currentTick/16);
+        const tIdx=currentTick%16;
+        const beatIdx=Math.floor(tIdx/4);
 
-playInterval=setInterval(()=>{
-const bIdx=Math.floor(currentTick/16);
-const tIdx=currentTick%16;
-const beatIdx=Math.floor(tIdx/4);
+        if(tIdx % 4 === 0){
+            document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
+            const columnBeats = document.querySelectorAll(`[id^="beat-${bIdx}-"][id$="-${beatIdx}"]`);
+            columnBeats.forEach(beat => beat.classList.add('active-beat'));
+            if(beatIdx === 0) {
+                const curBar = document.getElementById(`bar-${bIdx}`);
+                if(curBar) curBar.scrollIntoView({behavior:'smooth',block:'center'});
+                document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCount}`;
+            }
+        }
 
-if(tIdx % 4 === 0){
-document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
-const columnBeats = document.querySelectorAll(`[id^="beat-${bIdx}-"][id$="-${beatIdx}"]`);
-columnBeats.forEach(beat => beat.classList.add('active-beat'));
-if(beatIdx === 0) {
-const curBar = document.getElementById(`bar-${bIdx}`);
-if(curBar) curBar.scrollIntoView({behavior:'smooth',block:'center'});
-document.getElementById('displayBar').innerText=`BAR: ${bIdx+1} / ${totalBarsCount}`;
-}
-}
+        const layerNodes=document.querySelectorAll(`[id^="nt-${bIdx}-"][id$="-${tIdx}"]`);
+        layerNodes.forEach((n) => {
+            if(n.dataset.midi){
+                const parts = n.id.split('-');
+                const layerIndex = parts[2]; 
+                playTone(parseInt(n.dataset.midi), layerIndex, n);
+            }
+        });
 
-const layerNodes=document.querySelectorAll(`[id^="nt-${bIdx}-"][id$="-${tIdx}"]`);
-layerNodes.forEach((n) => {
-    if(n.dataset.midi){
-        const parts = n.id.split('-');
-        const layerIndex = parts[2]; 
-        playTone(parseInt(n.dataset.midi), layerIndex, n);
-    }
-});
-
-currentTick++;
-if(currentTick>=totalBarsCount*16) stopPlayback();
-},msPerTick);
+        currentTick++;
+        if(currentTick>=totalBarsCount*16) stopPlayback();
+    },msPerTick);
 }
 
 function pausePlayback(){
-isPlaying=false;
-clearInterval(playInterval);
-clearAllVoices(); 
-document.getElementById('btnPlay').innerText="RESUME";
+    isPlaying=false;
+    clearInterval(playInterval);
+    clearAllVoices(); 
+    document.getElementById('btnPlay').innerText="RESUME";
 }
 
 function stopPlayback(){
-pausePlayback();
-currentTick=0;
-clearAllVoices();
-document.getElementById('btnPlay').innerText="PLAY";
-document.querySelectorAll('.note.active').forEach(el=>el.classList.remove('active'));
-document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
-window.scrollTo({top:0,behavior:'smooth'});
+    pausePlayback();
+    currentTick=0;
+    clearAllVoices();
+    document.getElementById('btnPlay').innerText="PLAY";
+    document.querySelectorAll('.note.active').forEach(el=>el.classList.remove('active'));
+    document.querySelectorAll('.beat-unit.active-beat').forEach(el=>el.classList.remove('active-beat'));
+    window.scrollTo({top:0,behavior:'smooth'});
 }
 
 function createNewPage(title,tempo,pageNum){
-const page=document.createElement('div');
-page.className="a4-page";
-page.innerHTML=`
-<div class="sheet-header">
-<h1 class="text-xl font-black uppercase text-blue-900">${title}</h1>
-<div class="flex gap-4 text-[11px] font-bold text-gray-400">
-<span>Do = C</span>
-<span>4/4</span>
-<span>T: ${tempo}</span>
-</div>
-</div>
-<div class="staff-container"></div>
-<div class="mt-auto text-right text-[9px] font-bold text-gray-200">TABKLUNG PRO | Hal. ${pageNum}</div>
-`;
-return page;
+    const page=document.createElement('div');
+    page.className="a4-page";
+    page.innerHTML=`
+    <div class="sheet-header">
+    <h1 class="text-xl font-black uppercase text-blue-900">${title}</h1>
+    <div class="flex gap-4 text-[11px] font-bold text-gray-400">
+    <span>Do = C</span>
+    <span>4/4</span>
+    <span>T: ${tempo}</span>
+    </div>
+    </div>
+    <div class="staff-container"></div>
+    <div class="mt-auto text-right text-[9px] font-bold text-gray-200">TABKLUNG PRO | Hal. ${pageNum}</div>
+    `;
+    return page;
 }
 
 window.addEventListener('keydown',(e)=>{
-if(e.code==="Space"){e.preventDefault();togglePlay();}
-if(e.code==="Escape") stopPlayback();
+    if(e.code==="Space"){e.preventDefault();togglePlay();}
+    if(e.code==="Escape") stopPlayback();
 });
 </script>
 </body>
