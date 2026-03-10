@@ -42,7 +42,7 @@ body{background:#f8fafc;font-family:'Poppins',sans-serif;margin:0;padding:20px;p
 <div class="no-print flex justify-center py-10">
     <div class="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 text-center max-w-sm w-full">
         <h1 class="text-2xl font-black text-blue-900 mb-1">TABKLUNG PRO</h1>
-        <p class="text-xs text-gray-400 mb-6 font-bold tracking-widest">LEGATO ENGINE (DYNAMIC)</p>
+        <p class="text-xs text-gray-400 mb-6 font-bold tracking-widest">LEGATO ENGINE (CATBOX HOSTED)</p>
         <div class="space-y-4">
             <div>
                 <label class="block text-[10px] font-bold text-gray-400 text-left mb-1 uppercase tracking-wider">1. Load Score (JSON)</label>
@@ -112,27 +112,21 @@ function initAudio() {
     }
 }
 
-/** * PERBAIKAN KRUSIAL: 
- * Menggunakan dl.dropboxusercontent.com untuk menghindari blokir CORS saat 'fetch'
- */
 async function autoLoadAudio() {
     const statusText = document.getElementById('audioStatus');
-    // Ganti domain ke 'dl.dropboxusercontent.com' dan pastikan parameter 'raw=1'
-    const audioUrl = "https://dl.dropboxusercontent.com/scl/fi/8719fczkaocgu4kse470e/47790002-angklung-f-4-120-279387.mp3?rlkey=7k9lujakltf78c48j719dn0wr&raw=1";
+    // Memanggil audio dari Catbox yang ramah CORS
+    const audioUrl = "https://files.catbox.moe/3jafhl.mp3"; 
     
     try {
-        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-blue-500 font-bold'>Sedang Mengunduh...</span>";
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-blue-500 font-bold'>Mengunduh Audio...</span>";
         
-        // Coba ambil data dengan mode cors
         const response = await fetch(audioUrl);
-        if(!response.ok) throw new Error("Gagal mengunduh.");
+        if(!response.ok) throw new Error("Gagal mengunduh audio.");
         
         const arrayBuffer = await response.arrayBuffer();
         
-        // Inisialisasi konteks sebelum melakukan decoding
         initAudio();
         
-        // Decode audio data
         audioCtx.decodeAudioData(arrayBuffer, (buffer) => {
             angklungBuffer = buffer;
             if(statusText) statusText.innerHTML = "Status Audio: <span class='text-green-500 font-bold'>Angklung Ready!</span>";
@@ -142,7 +136,7 @@ async function autoLoadAudio() {
 
     } catch (err) { 
         console.error("Audio Load Error:", err);
-        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-red-500 font-bold'>Gagal Muat (Cek Koneksi/CORS)</span>";
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-red-500 font-bold'>Gagal Muat. Coba refresh.</span>";
     }
 }
 
@@ -304,10 +298,9 @@ function togglePlay(){
     initAudio();
     if(audioCtx.state==='suspended') audioCtx.resume();
     
-    // Jika audio belum siap saat ditekan play, coba muat ulang sekali lagi
     if (!angklungBuffer) {
         autoLoadAudio();
-        alert("Audio sedang diunduh, silakan tunggu sebentar dan tekan PLAY lagi.");
+        alert("Audio sedang dimuat, silakan tunggu sebentar dan tekan PLAY lagi.");
         return;
     }
 
