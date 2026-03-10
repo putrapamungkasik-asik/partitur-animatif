@@ -69,17 +69,14 @@ body{background:#f8fafc;font-family:'Poppins',sans-serif;margin:0;padding:20px;p
 <script>
 let currentTick=0; let isPlaying=false; let playInterval; let globalTempo=120; let totalBarsCount=0; let rawData=null; let audioCtx; let angklungBuffer = null; 
 const BASE_MIDI = 60; 
-let globalKeyBaseMidi = 60; // Untuk menggeser visualisasi partitur
+let globalKeyBaseMidi = 60; 
 let globalAllBars = []; 
 let activeVoices = {}; 
 let reverbNode, reverbGain, dryGain; 
 
-/** * KONVERSI DINAMIS MIDI KE ANGKLUNG (NADA NOMOR)
- */
 function getAngklungNoteInfo(midi) {
     const noteLabels = ["1", "1/", "2", "2/", "3", "4", "4/", "5", "5/", "6", "6/", "7"];
     const val = parseInt(midi);
-    // Menggunakan globalKeyBaseMidi agar bisa bergeser sesuai keyBase dari JSON
     const relative = val - globalKeyBaseMidi;
     const octave = Math.floor(relative / 12);
     const noteIdx = ((relative % 12) + 12) % 12;
@@ -115,27 +112,37 @@ function initAudio() {
     }
 }
 
-/** * INTEGRASI AUTO-LOAD AUDIO
- * Memuat file audio dari URL secara otomatis saat DOM siap.
+/** * PERBAIKAN KRUSIAL: 
+ * Menggunakan dl.dropboxusercontent.com untuk menghindari blokir CORS saat 'fetch'
  */
 async function autoLoadAudio() {
     const statusText = document.getElementById('audioStatus');
-    const audioUrl = "https://dl.dropboxusercontent.com/scl/fi/8719fczkaocgu4kse470e/47790002-angklung-f-4-120-279387.mp3?rlkey=7k9lujakltf78c48j719dn0wr&st=64qwhudg&dl=1";
+    // Ganti domain ke 'dl.dropboxusercontent.com' dan pastikan parameter 'raw=1'
+    const audioUrl = "https://dl.dropboxusercontent.com/scl/fi/8719fczkaocgu4kse470e/47790002-angklung-f-4-120-279387.mp3?rlkey=7k9lujakltf78c48j719dn0wr&raw=1";
     
     try {
         if(statusText) statusText.innerHTML = "Status Audio: <span class='text-blue-500 font-bold'>Sedang Mengunduh...</span>";
-        initAudio();
+        
+        // Coba ambil data dengan mode cors
         const response = await fetch(audioUrl);
-        if(!response.ok) throw new Error("Gagal mengunduh audio dari server.");
+        if(!response.ok) throw new Error("Gagal mengunduh.");
         
         const arrayBuffer = await response.arrayBuffer();
-        angklungBuffer = await audioCtx.decodeAudioData(arrayBuffer);
         
-        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-green-500 font-bold'>Angklung Ready!</span>";
-        console.log("Audio Angklung berhasil dimuat otomatis.");
+        // Inisialisasi konteks sebelum melakukan decoding
+        initAudio();
+        
+        // Decode audio data
+        audioCtx.decodeAudioData(arrayBuffer, (buffer) => {
+            angklungBuffer = buffer;
+            if(statusText) statusText.innerHTML = "Status Audio: <span class='text-green-500 font-bold'>Angklung Ready!</span>";
+        }, (err) => {
+            throw new Error("Gagal Decode Audio.");
+        });
+
     } catch (err) { 
-        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-red-500 font-bold'>Gagal Muat Audio Otomatis.</span>";
-        console.error("Auto-load error:", err); 
+        console.error("Audio Load Error:", err);
+        if(statusText) statusText.innerHTML = "Status Audio: <span class='text-red-500 font-bold'>Gagal Muat (Cek Koneksi/CORS)</span>";
     }
 }
 
@@ -161,7 +168,6 @@ function playTone(midiNote, layerIdx, visualNode) {
         delete activeVoices[layerIdx];
     }
 
-    // BASE_MIDI di sini tetap 60 agar pitch audio absolut tidak rusak
     const ratio = Math.pow(2, (midiNote - BASE_MIDI) / 12);
     const loopStartTime = angklungBuffer.duration > 0.4 ? angklungBuffer.duration * 0.25 : 0;
     const loopEndTime = angklungBuffer.duration > 0.4 ? angklungBuffer.duration * 0.75 : angklungBuffer.duration;
@@ -221,20 +227,14 @@ document.getElementById('jsonInput').onchange=function(e){
     reader.onload=(ev)=>{
         try{
             rawData=JSON.parse(ev.target.result);
-            
-            // --- PEMROSESAN TEMPO BARU ---
             let tempoVal=parseFloat(rawData.tempo);
-            // Jika nilainya desimal (spt 0.125), ubah durasi detik per ketukan tsb menjadi BPM
             if(tempoVal > 0 && tempoVal < 5) {
                 globalTempo = Math.round(60 / (tempoVal * 4));
             } else {
                 globalTempo = tempoVal > 0 ? tempoVal : 120;
             }
-            
-            // --- PEMROSESAN KEYBASE BARU ---
             let kb = rawData.keyBase !== undefined ? parseInt(rawData.keyBase) : 0;
             globalKeyBaseMidi = 60 + kb;
-            
             document.getElementById('displayTempo').innerText=`BPM: ${globalTempo}`;
             render(rawData);
             document.getElementById('controls').style.display='flex';
@@ -247,16 +247,12 @@ function render(data){
     const printArea=document.getElementById('print-area');
     printArea.innerHTML="";
     globalAllBars=[];
-    
-    // Menentukan nama kunci untuk judul
     let kb = data.keyBase !== undefined ? parseInt(data.keyBase) : 0;
     const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let keyName = KEY_NAMES[((kb % 12) + 12) % 12];
-    
     data.sections.forEach(sec=>{sec.bars.forEach(bar=>globalAllBars.push(bar));});
     totalBarsCount=globalAllBars.length;
     const BARS_PER_PAGE=20;
-    
     for(let i=0;i<globalAllBars.length;i+=BARS_PER_PAGE){
         const pageEl=createNewPage(data.songTitle||"STUDI ANGKLUNG",globalTempo,Math.floor(i/BARS_PER_PAGE)+1, keyName);
         const staff=pageEl.querySelector('.staff-container');
@@ -307,6 +303,14 @@ function createNote(v,bIdx,lIdx,tIdx){
 function togglePlay(){
     initAudio();
     if(audioCtx.state==='suspended') audioCtx.resume();
+    
+    // Jika audio belum siap saat ditekan play, coba muat ulang sekali lagi
+    if (!angklungBuffer) {
+        autoLoadAudio();
+        alert("Audio sedang diunduh, silakan tunggu sebentar dan tekan PLAY lagi.");
+        return;
+    }
+
     if(isPlaying) pausePlayback();
     else startPlayback();
 }
@@ -387,4 +391,3 @@ window.addEventListener('keydown',(e)=>{
 </script>
 </body>
 </html>
-
